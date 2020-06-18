@@ -1,0 +1,393 @@
+require "cdlua"
+require "cdluacontextplus"
+require "iuplua"
+require "iupluacd"
+
+local function printf( fmt, ... ) print( string.format( fmt, ... ) ) end
+local unpack = table.unpack or unpack
+local function clamp( l, x, u ) return math.max( l, math.min( x, u ) ) end
+local paint_func = dofile "manual_adjust_paint.lua"
+local geom_analysis_func = dofile "geometry_analysis.lua"
+local constrain_analysis_func = dofile "constraint_analysis.lua"
+
+iup.SetGlobal( "UTF8MODE", "YES" )
+
+local variables = {
+    { "Saw offset from hilt",
+        35.0-0.2, 35.0 },
+    { "Saw horizontal length",
+        263.9-1.0, 263.9 },
+    { "Saw vertical drop",
+        1.0, 6.0 },
+    { "Top blade radius",
+        240.0*0.4, 240.0*1.6 },
+    { "Tip radius",
+        (1.0-0.2)/2, 6.0 },
+    { "Hilt height",
+        --26.0-0.3, 26.0 },
+        25.0, 26.0 },
+    { "Bottom horizontal length",
+        (375.0-76.1)*0.9, (375-76.1)*1.1 },
+    { "Bottom vertical drop from saw vertical drop",
+        34.0*0.9, 34.0*1.1 },
+    { "Bottom blade radius",
+        174.0*0.4, 174.0*1.6 }
+}
+
+local latest_geometry, latest_constraints, values_invalidated
+    values_invalidated = true
+local constraint_keys = {}
+--Create initial geometry and constraints from default values, we'll use this for constructing the reporting controls
+do
+    local values = {}
+    for i, v in ipairs( variables ) do
+        values[i] = (v[2]+v[3])/2
+    end
+    latest_geometry = geom_analysis_func( values )
+    latest_constraints = constrain_analysis_func( values, latest_geometry, variables )
+    
+    for key in pairs( latest_constraints ) do
+        constraint_keys[#constraint_keys+1] = key
+    end
+    table.sort( constraint_keys )
+end
+
+local display
+
+--Decide which screen to display on. Use the one with the largest area.
+--TODO: What was I thinking? I need to be using the one with the widest horizontal resolution.
+do  local entries = {}
+    for entry in iup.GetGlobal( "MONITORSINFO" ):gmatch( "([^\n]+)" ) do
+        local x, y, width, height = entry:match( "(%S+)%s+(%S+)%s+(%S+)%s(%S+)" )
+        --printf( [[Origin: %-11s Size: %ix%i]], ("(%i,%i)"):format( x, y ), width, height )
+        entries[ #entries+1 ] = { x = x, y = y, width = width, height = height }
+    end
+    table.sort( entries, function( a, b ) return (a.width * a.height) > (b.width * b.height) end )
+    display = entries[1]
+end
+
+--Decide some basic aspects of the top-level dialog's size and location.
+local dlg_width = math.floor( display.width * 0.8 )
+local dlg_x, dlg_y
+do
+    local dlg_ofs = math.floor( (display.width - dlg_width) / 2 )
+    dlg_x = display.x + dlg_ofs
+    dlg_y = display.y + dlg_ofs
+end
+
+local function invalidate_canvas()
+    values_invalidated = true
+    iup.Update( iup.GetDialogChild( dlg, "main_canvas" ) )
+end
+
+--[=[
+local function update_constraint_text( constraints )
+    local txt = iup.GetDialogChild( dlg, "constraints_text" )
+    
+    local lines = {}
+    local constraints_sorted = {}
+    for key, constraint in pairs( constraints ) do
+        constraint.num = key
+        constraints_sorted[#constraints_sorted+1] = constraint
+    end
+    table.sort( constraints_sorted, function( a, b ) return a.num < b.num end )
+    
+    for _, constraint in ipairs( constraints_sorted ) do
+        local num = constraint.num
+        local num_lbl
+        if num % 1 ~= 0.0 then
+            num_lbl = ("con%.1f"):format( num )
+        else
+            num_lbl = ("con%i"):format( num )
+        end
+        if     constraint.eliminated then
+            lines[#lines+1] = string.format( "%s: (ELIMINATED)", num_lbl )
+        elseif constraint.todo then
+            lines[#lines+1] = string.format( "%s: TODO", num_lbl )
+        else
+            lines[#lines+1] = string.format( "%s: %s (%s) %s",
+                num_lbl,
+                constraint.range,
+                constraint.numeric_status,
+                constraint.satisfied and "GOOD" or "BAD"
+            )
+        end
+    end
+    
+    local new_text = table.concat( lines, "\n" )
+    txt.value = new_text
+    --printf( "Updated textbox with:\n%s", new_text )
+end
+--]=]
+
+local constraint_report_columns = {
+    {   name = "ID";
+        create = function ( constraint )
+            return iup.label{ 
+                title = tostring( constraint.key );
+                tip = constraint.description;
+                tipdelay = tostring( 10e3 );
+            }
+        end;
+        update = function ( control, constraint )
+            --do nothing
+        end;
+    };
+    {   name = "Status";
+        create = function ( constraint )
+            local value, fgcolor
+            
+            if     constraint.eliminated then
+                value = "(ELIMINATED)"
+                fgcolor = "192 192 192"
+            elseif constraint.todo then
+                value = "TODO"
+                fgcolor = "192 192 192"
+            else
+                value = constraint.numeric_status
+                fgcolor = constraint.satisfied and "0 255 0" or "255 0 0"
+            end
+            
+            return iup.label{
+                alignment = "ARIGHT:ACENTER";
+                readonly = "YES";
+                fgcolor = fgcolor;
+                title = value;
+            };
+        end;
+        update = function ( control, constraint )
+            if not (constraint.eliminated or constraint.todo) then
+                control.fgcolor = constraint.satisfied and "0 255 0" or "255 0 0"
+                control.title = constraint.numeric_status
+            end
+        end;
+    };
+    {   name = "Spread";
+        create = function ( constraint )
+            local color = nil
+            if constraint.todo or constraint.eliminated then color = "192 192 192" end
+            return iup.label{
+                alignment = "ARIGHT:ACENTER";
+                readonly = "YES";
+                fgcolor = color;
+                title = constraint.todo and "N/A" or constraint.spread or "";
+            }
+        end;
+        update = function ( control, constraint )
+            if not constraint.eliminated or constraint.todo then
+                control.title = constraint.spread
+            end
+        end;
+    };
+    {   name = "Range";
+        create = function ( constraint )
+            local fgcolor = nil
+            if constraint.eliminated or constraint.todo then
+                fgcolor = "192 192 192"
+            end
+            return iup.label{
+                alignment = "ARIGHT:ACENTER";
+                readonly = "YES";
+                fgcolor = fgcolor;
+                title = constraint.range or "";
+            }
+        end;
+        update = function ( control, constraint )
+            --do nothing
+        end;
+    };
+}
+local report_box = {
+    name = "constraints_box";
+    orientation = "HORIZONTAL";
+    numdiv = tostring( #constraint_report_columns );
+    sizelin = "-1";
+    gapcol = "2";
+    normalizesize = "HORIZONTAL";
+    margin = "2x2";
+}
+do  --Generate report-box elements
+
+    --Start with generating column names
+    local header_font = string.format( "%s,Bold %s", iup.GetGlobal("DEFAULTFONTFACE"), iup.GetGlobal("DEFAULTFONTSIZE") )
+    for i, col in ipairs( constraint_report_columns ) do
+        report_box[i] = iup.label{
+            title = col.name;
+            font = header_font;
+            alignment = (i == 1) and "ALEFT:ACENTER" or "ARIGHT:ACENTER";
+        }
+    end
+    
+    for constraint_i, constraint_key in ipairs( constraint_keys ) do
+        local constraint = latest_constraints[ constraint_key ]
+        for col_i, col in ipairs( constraint_report_columns ) do
+            report_box[#constraint_report_columns*constraint_i + col_i] = col.create( constraint )
+        end
+    end
+    local sz = #report_box
+    report_box = iup.gridbox( report_box )
+end
+
+local function update_constraint_text ( )
+    for constraint_i, constraint_key in ipairs( constraint_keys ) do
+        local constraint = latest_constraints[ constraint_key ]
+        for col_i, col in ipairs( constraint_report_columns ) do
+            local control = report_box[ #constraint_report_columns*constraint_i + col_i ]
+            col.update( control, constraint )
+        end
+    end
+end
+
+dlg = iup.dialog
+{
+    title = "SG 98/05 Manual Explorer";
+    shrink = "YES";
+    --rastersize = tostring(dlg_width).."x";
+    
+    iup.vbox{
+        iup.canvas{
+            name = "main_canvas";
+            expand = "HORIZONTAL";
+            --rastersize = "x100";
+            rastersize = dlg_width .. "x" .. math.floor( dlg_width / 5 );
+            
+            ---[[
+            map_cb = function( self )
+                --printf( [=[Mapping canvas element; self = %s (%s)]=], tostring( self ), type( self ) )
+                --local width = tonumber(self.rastersize:match("^(%d+)"))
+                --local height = math.floor( width / 5 )
+                --self.rastersize = width .. "x" .. height
+                cd.UseContextPlus( true )
+                self.canvas = cd.CreateCanvas( cd.IUP, self )
+            end; --]]
+            
+            --Going to replace with function from another file in a bit.
+            ---[[
+            action = function( self )
+                local values = {}
+                for i = 1, #variables do
+                    values[i] = tonumber( iup.GetDialogChild( self, string.format( "x%i_val", i ) ).value )
+                end
+                if values_invalidated then
+                    latest_geometry = geom_analysis_func( values )
+                    latest_constraints = constrain_analysis_func( values, latest_geometry, variables )
+                    update_constraint_text( latest_constraints )
+                    values_invalidated = false
+                end
+                local cnv = self.canvas
+                cnv:Activate()
+                --paint_func( cnv, values, geom_analysis_func( values ) )
+                paint_func( cnv, values, latest_geometry, latest_constraints )
+                cnv:Flush()
+                cnv:Deactivate()
+            end; --]]
+        };
+        iup.hbox{
+            iup.frame{
+                title = "Parameter Controls";
+                iup.vbox{
+                    (function()
+                        local ret = {}
+                        for i, variable in ipairs( variables ) do
+                            local min_val, max_val = variable[2], variable[3]
+                            local default_val = (min_val+max_val)/2
+                            --local inc_val = math.max( 0.1, (max_val-min_val)/20 )
+                            local inc_val = 0.1
+                            ret[#ret+1] = iup.hbox{
+                                iup.label{ title = variable[1] };
+                                iup.fill{};
+                                iup.val{
+                                    name = string.format( "x%i_slide", i );
+                                    orientation = "HORIZONTAL";
+                                    value = "0.5";
+                                    valuechanged_cb = function ( self )
+                                        local normval = tonumber( self.value )
+                                        local val = min_val + normval*(max_val-min_val)
+                                        local text = iup.GetDialogChild( self, string.format( "x%i_val", i ) )
+                                        text.value = string.format( "%.1f", val )
+                                        invalidate_canvas()
+                                    end;
+                                };
+                                iup.spinbox{
+                                    iup.text{
+                                        name = string.format( "x%i_val", i );
+                                        mask = iup.MASK_UFLOAT;
+                                        value = string.format( "%.1f", default_val );
+                                        visiblecolumns = "8";
+                                        valuechanged_cb = function( self )
+                                            local slider = iup.GetDialogChild( self, string.format( "x%i_slide", i ) )
+                                            local normval = (tonumber(self.value)-min_val)/(max_val-min_val)
+                                            slider.value = tostring(normval)
+                                            
+                                            invalidate_canvas()
+                                        end;
+                                    };
+                                    spin_cb = function( self, num )
+                                        local cur_val = tonumber( self[1].value )
+                                        local new_val = clamp( min_val, cur_val + num*inc_val, max_val )
+                                        self[1].value = string.format( "%.1f", new_val )
+                                        
+                                        local slider = iup.GetDialogChild( self, string.format( "x%i_slide", i ) )
+                                        local normval = (tonumber(self[1].value)-min_val)/(max_val-min_val)
+                                        slider.value = tostring(normval)
+                                        
+                                        invalidate_canvas()
+                                    end;
+                                };
+                            }
+                        end
+                        ret[#ret+1] = iup.hbox{
+                            iup.fill{};
+                            iup.button{
+                                title = "Reset Values";
+                                --fgcolor = "0 128 0";
+                                action = function( self )
+                                    for i, variable in ipairs( variables ) do
+                                        local text = iup.GetDialogChild( self, string.format( "x%i_val", i ) )
+                                        text.value = string.format( "%.1f", (variable[2]+variable[3])/2 )
+                                        local slider = iup.GetDialogChild( self, string.format( "x%i_slide", i ) )
+                                        slider.value = "0.5"
+                                    end
+                                    invalidate_canvas()
+                                end;
+                            };
+                        };
+                        return unpack( ret )
+                    end)();
+                };
+            };
+            iup.frame{
+                title = "Constraints Status";
+                --[=[
+                iup.text{ --TODO
+                    name = "constraints_text";
+                    --value = "TODO";
+                    --fgcolor = "255 0 0";
+                    
+                    readonly = "YES";
+                    multiline = "YES";
+                    scrollbar = "NO";
+                    autohide = "YES";
+                    visiblelines = "7";
+                    visiblecolumns = "40";
+                    
+                    expand = "VERTICAL";
+                };
+                --]=]
+                report_box;
+            };
+        };
+    };
+}
+
+function dlg:close_cb()
+  iup.ExitLoop()
+  dlg:destroy()
+  return iup.IGNORE
+end
+
+dlg:showxy( dlg_x, dlg_y )
+
+if (iup.MainLoopLevel()==0) then
+  iup.MainLoop()
+end

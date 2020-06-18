@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1417.32pt" height="283.465pt" viewBox="0 0 1890 378" version="1.1">
+<g>
+<pattern id="pattern0" patternUnits="userSpaceOnUse" x="0" y="0" width="7" height="7">
+<line x1="0" y1="3" x2="7" y2="3" style="fill:none; stroke:rgb(0,0,0); opacity:1" />
+</pattern>
+<g transform="matrix(1 0 0 -1 175 73)">
+<line x1="0" y1="0" x2="131.852" y2="0" style="fill:none; stroke:rgb(255,0,0); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:0; opacity:1" />
+<line x1="131.852" y1="0" x2="1126.98" y2="-13.195" style="fill:none; stroke:rgb(255,153,0); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:0; opacity:1" />
+<line x1="0" y1="0" x2="0" y2="-97.4545" style="fill:none; stroke:rgb(204,255,0); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:0; opacity:1" />
+<line x1="0" y1="-97.4545" x2="1129.24" y2="-225.635" style="fill:none; stroke:rgb(51,255,0); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:0; opacity:1" />
+<path d="M1126.98,-13.195 A906.72,904.8 0 0,0 1531.47,-114.241" style="fill:none; stroke:rgb(0,255,102); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:0; opacity:1" />
+<path d="M1532.11,-142.02 A657.372,655.98 0 0,0 1129.24,-225.634" style="fill:none; stroke:rgb(0,255,255); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:0; opacity:1" />
+<path d="M1531.47,-114.241 A15.8676,15.834 0 0,0 1532.11,-142.02" style="fill:none; stroke:rgb(0,102,255); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:0; opacity:1" />
+</g>
+</g>
+</svg>
